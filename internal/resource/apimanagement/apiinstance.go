@@ -71,6 +71,7 @@ type EndpointModel struct {
 	DeploymentType  types.String `tfsdk:"deployment_type"`
 	Type            types.String `tfsdk:"type"`
 	BasePath        types.String `tfsdk:"base_path"`
+	ProxyURI        types.String `tfsdk:"proxy_uri"`
 	ResponseTimeout types.Int64  `tfsdk:"response_timeout"`
 }
 
@@ -92,6 +93,7 @@ var endpointAttrTypes = map[string]attr.Type{
 	"deployment_type":  types.StringType,
 	"type":             types.StringType,
 	"base_path":        types.StringType,
+	"proxy_uri":        types.StringType,
 	"response_timeout": types.Int64Type,
 }
 
@@ -106,6 +108,7 @@ func endpointFromObject(obj types.Object) *EndpointModel {
 		DeploymentType:  attrs["deployment_type"].(types.String),
 		Type:            attrs["type"].(types.String),
 		BasePath:        attrs["base_path"].(types.String),
+		ProxyURI:        attrs["proxy_uri"].(types.String),
 		ResponseTimeout: attrs["response_timeout"].(types.Int64),
 	}
 }
@@ -120,6 +123,7 @@ func endpointToObject(ep *EndpointModel) types.Object {
 		"deployment_type":  ep.DeploymentType,
 		"type":             ep.Type,
 		"base_path":        ep.BasePath,
+		"proxy_uri":        ep.ProxyURI,
 		"response_timeout": ep.ResponseTimeout,
 	})
 	if diags.HasError() {
@@ -384,6 +388,12 @@ func (r *APIInstanceResource) Schema(_ context.Context, _ resource.SchemaRequest
 						Description: "API base path for the Omni Gateway proxy listener (e.g. 'my-api'). " +
 							"The provider constructs the full proxy URI as http://0.0.0.0:8081/<base_path>.",
 						Optional: true,
+					},
+					"proxy_uri": schema.StringAttribute{
+						Description: "Proxy URI for the Omni Gateway endpoint. Defaults to http://0.0.0.0:8081 when no base_path is provided.",
+						Optional: true,
+						Computed: true,
+						Default:  stringdefault.StaticString("http://0.0.0.0:8081"),
 					},
 					"response_timeout": schema.Int64Attribute{
 						Description: "Response timeout in milliseconds.",
@@ -1019,12 +1029,20 @@ func (r *APIInstanceResource) expandCreateRequest(ctx context.Context, data APII
 
 		req.Endpoint.TLSContexts = &apimanagement.APIInstanceTLSContexts{}
 
-		basePath := ""
-		if !ep.BasePath.IsNull() && !ep.BasePath.IsUnknown() {
-			basePath = strings.TrimPrefix(ep.BasePath.ValueString(), "/")
+		if !ep.ProxyURI.IsNull() && !ep.ProxyURI.IsUnknown() && ep.ProxyURI.ValueString() != "http://0.0.0.0:8081" {
+			proxyURI := ep.ProxyURI.ValueString()
+			req.Endpoint.ProxyURI = &proxyURI
+		} else {
+			basePath := ""
+			if !ep.BasePath.IsNull() && !ep.BasePath.IsUnknown() {
+				basePath = strings.TrimPrefix(ep.BasePath.ValueString(), "/")
+			}
+			proxyURI := "http://0.0.0.0:8081"
+			if basePath != "" {
+				proxyURI += "/" + basePath
+			}
+			req.Endpoint.ProxyURI = &proxyURI
 		}
-		proxyURI := "http://0.0.0.0:8081/" + basePath
-		req.Endpoint.ProxyURI = &proxyURI
 	}
 
 	if !data.ConsumerEndpoint.IsNull() && !data.ConsumerEndpoint.IsUnknown() {
@@ -1078,12 +1096,20 @@ func (r *APIInstanceResource) expandUpdateRequest(ctx context.Context, data APII
 
 		req.Endpoint.TLSContexts = &apimanagement.APIInstanceTLSContexts{}
 
-		basePath := ""
-		if !ep.BasePath.IsNull() && !ep.BasePath.IsUnknown() {
-			basePath = strings.TrimPrefix(ep.BasePath.ValueString(), "/")
+		if !ep.ProxyURI.IsNull() && !ep.ProxyURI.IsUnknown() && ep.ProxyURI.ValueString() != "http://0.0.0.0:8081" {
+			proxyURI := ep.ProxyURI.ValueString()
+			req.Endpoint.ProxyURI = &proxyURI
+		} else {
+			basePath := ""
+			if !ep.BasePath.IsNull() && !ep.BasePath.IsUnknown() {
+				basePath = strings.TrimPrefix(ep.BasePath.ValueString(), "/")
+			}
+			proxyURI := "http://0.0.0.0:8081"
+			if basePath != "" {
+				proxyURI += "/" + basePath
+			}
+			req.Endpoint.ProxyURI = &proxyURI
 		}
-		proxyURI := "http://0.0.0.0:8081/" + basePath
-		req.Endpoint.ProxyURI = &proxyURI
 	}
 
 	if !data.ConsumerEndpoint.IsNull() && !data.ConsumerEndpoint.IsUnknown() {
@@ -1470,9 +1496,11 @@ func (r *APIInstanceResource) flattenInstance(_ context.Context, inst *apimanage
 		}
 
 		if inst.Endpoint.ProxyURI != nil && *inst.Endpoint.ProxyURI != "" {
+			ep.ProxyURI = types.StringValue(*inst.Endpoint.ProxyURI)
 			ep.BasePath = types.StringValue(strings.TrimPrefix(*inst.Endpoint.ProxyURI, "http://0.0.0.0:8081/"))
 		} else {
 			ep.BasePath = types.StringNull()
+			ep.ProxyURI = types.StringNull()
 		}
 
 		if inst.Endpoint.ResponseTimeout != nil {
