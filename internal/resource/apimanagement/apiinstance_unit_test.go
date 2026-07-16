@@ -175,7 +175,9 @@ func TestAPIInstanceResource_ValidateConfig(t *testing.T) {
 			"deployment_type":  tftypes.NewValue(tftypes.String, "CH"),
 			"type":             tftypes.NewValue(tftypes.String, "http"),
 			"base_path":        tftypes.NewValue(tftypes.String, nil),
+			"proxy_uri":        tftypes.NewValue(tftypes.String, nil),
 			"response_timeout": tftypes.NewValue(tftypes.Number, 5000),
+			"tls_contexts":     tftypes.NewValue(epType.AttributeTypes["tls_contexts"].(tftypes.Object), nil),
 		})
 
 		vals := nullAPIInstanceState(t, r)

@@ -286,6 +286,55 @@ func TestAPIInstanceResource_flattenInstance(t *testing.T) {
 		}
 	})
 
+	t.Run("endpoint with inbound tls context is flattened", func(t *testing.T) {
+		proxyURI := "http://0.0.0.0:8081/mypath"
+		inst := &apimgmtclient.APIInstance{
+			ID:         3,
+			Technology: "mule4",
+			Endpoint: &apimgmtclient.APIInstanceEndpoint{
+				DeploymentType: "CH",
+				Type:           "http",
+				ProxyURI:       &proxyURI,
+				TLSContexts: &apimgmtclient.APIInstanceTLSContexts{
+					Inbound: &apimgmtclient.APIInstanceTLSContext{
+						SecretGroupID: "sg-123",
+						TLSID:         "tls-456",
+					},
+				},
+			},
+		}
+		data := &APIInstanceResourceModel{OrganizationID: types.StringValue("org-1")}
+		r.flattenInstance(ctx, inst, data, "org-1", "env-1")
+
+		if data.Endpoint.IsNull() {
+			t.Fatal("Endpoint should not be null")
+		}
+		endpoint := endpointFromObject(data.Endpoint)
+		if endpoint == nil {
+			t.Fatal("endpointFromObject returned nil")
+		}
+		if endpoint.TLSContexts.IsNull() {
+			t.Fatal("tls_contexts should not be null")
+		}
+		ctxObj := endpointTLSContextsFromObject(endpoint.TLSContexts)
+		if ctxObj == nil {
+			t.Fatal("endpointTLSContextsFromObject returned nil")
+		}
+		if ctxObj.Inbound.IsNull() {
+			t.Fatal("tls_contexts.inbound should not be null")
+		}
+		inbound := endpointTLSContextFromObject(ctxObj.Inbound)
+		if inbound == nil {
+			t.Fatal("endpointTLSContextFromObject returned nil")
+		}
+		if inbound.SecretGroupID.ValueString() != "sg-123" {
+			t.Errorf("SecretGroupID = %q, want sg-123", inbound.SecretGroupID.ValueString())
+		}
+		if inbound.TLSContextID.ValueString() != "tls-456" {
+			t.Errorf("TLSContextID = %q, want tls-456", inbound.TLSContextID.ValueString())
+		}
+	})
+
 	t.Run("nil endpoint leaves endpoint null", func(t *testing.T) {
 		inst := &apimgmtclient.APIInstance{
 			ID:         2,
@@ -408,7 +457,9 @@ func TestAPIInstanceResource_expandCreateRequest(t *testing.T) {
 			"deployment_type":  types.StringValue("CH"),
 			"type":             types.StringValue("http"),
 			"base_path":        types.StringValue("/api/v1"),
+			"proxy_uri":        types.StringNull(),
 			"response_timeout": types.Int64Null(),
+			"tls_contexts":     types.ObjectNull(endpointTLSContextsAttrTypes),
 		})
 		data := APIInstanceResourceModel{
 			Technology:           types.StringValue("mule4"),
@@ -427,6 +478,48 @@ func TestAPIInstanceResource_expandCreateRequest(t *testing.T) {
 		}
 		if req.Endpoint.ProxyURI == nil || *req.Endpoint.ProxyURI != "http://0.0.0.0:8081/api/v1" {
 			t.Errorf("ProxyURI = %v, want http://0.0.0.0:8081/api/v1", req.Endpoint.ProxyURI)
+		}
+	})
+
+	t.Run("endpoint with inbound tls context sets TLSContexts inbound", func(t *testing.T) {
+		tlsInboundObj, _ := types.ObjectValue(endpointTLSContextAttrTypes, map[string]attr.Value{
+			"secret_group_id": types.StringValue("sg-123"),
+			"tls_context_id":  types.StringValue("tls-456"),
+		})
+		tlsContextsObj, _ := types.ObjectValue(endpointTLSContextsAttrTypes, map[string]attr.Value{
+			"inbound": tlsInboundObj,
+		})
+		epObj, _ := types.ObjectValue(endpointAttrTypes, map[string]attr.Value{
+			"deployment_type":  types.StringValue("CH"),
+			"type":             types.StringValue("http"),
+			"proxy_uri":        types.StringValue("http://0.0.0.0:8081/api/v1"),
+			"base_path":        types.StringNull(),
+			"response_timeout": types.Int64Null(),
+			"tls_contexts":     tlsContextsObj,
+		})
+		data := APIInstanceResourceModel{
+			Technology:       types.StringValue("mule4"),
+			UpstreamURI:      types.StringNull(),
+			Endpoint:         epObj,
+			Deployment:       types.ObjectNull(deploymentAttrTypes),
+			Routing:          types.ListNull(routeListElemType),
+			ProviderID:       types.StringNull(),
+			InstanceLabel:    types.StringNull(),
+			ApprovalMethod:   types.StringNull(),
+			ConsumerEndpoint: types.StringNull(),
+		}
+		req := r.expandCreateRequest(ctx, data)
+		if req.Endpoint == nil {
+			t.Fatal("Endpoint should not be nil")
+		}
+		if req.Endpoint.TLSContexts == nil || req.Endpoint.TLSContexts.Inbound == nil {
+			t.Fatal("TLSContexts.Inbound should not be nil")
+		}
+		if req.Endpoint.TLSContexts.Inbound.SecretGroupID != "sg-123" {
+			t.Errorf("SecretGroupID = %q, want sg-123", req.Endpoint.TLSContexts.Inbound.SecretGroupID)
+		}
+		if req.Endpoint.TLSContexts.Inbound.TLSID != "tls-456" {
+			t.Errorf("TLSID = %q, want tls-456", req.Endpoint.TLSContexts.Inbound.TLSID)
 		}
 	})
 }
